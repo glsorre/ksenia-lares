@@ -100,16 +100,16 @@ Active the given scenario on the alarm. Can be used to arm or disarm the alarm.
 
 ```python
 @abstractmethod
-async def bypass_zone(zone: int | Zone, pin: str, bypass: bool) -> bool
+async def bypass_zone(zone: int | Zone, pin: str, bypass: ZoneBypass) -> bool
 ```
 
 Activates or deactivates the bypass on the given zone.
 
 **Arguments**:
 
-- `zone` _int | Zone_ - The zone or id of the zone to (un)bypass
-- `pin` _str_ - PIN code, required for bypass
-- `bypass` _bool_ - True to bypass zone, False to unbypass.
+- `zone` _int | Zone_ - The zone or id of the zone to (un)bypass.
+- `pin` _str_ - PIN code, required for bypass.
+- `bypass` _ZoneBypass_ - Set to bypass or unbypass zone.
   
 
 **Returns**:

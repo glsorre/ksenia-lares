@@ -11,10 +11,10 @@ Unofficial python API for the Ksenia Lares alarm.
 #### initialize
 
 ```python
-def initialize(config: dict) -> BaseApi
+def get_api(config: dict) -> BaseApi
 ```
 
-Initialize API based on the API version and returns a [BaseApi](base.md) class for the given `api_version`:
+Initialize and returns API based on the API version and returns a [BaseApi](base.md) class for the given `api_version`:
 - IP: Returns [IpApi](IP.md)
 - 4: Not yet supported
 
