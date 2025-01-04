@@ -185,14 +185,14 @@ class IpAPI(BaseApi):
         """
 
         if isinstance(zone, Zone):
-            zoneId = zone.id
+            zone_id = zone.id
         elif isinstance(zone, int):
-            zoneId = zone
+            zone_id = zone
         else:
             raise TypeError("Zone must be an int (zone ID) or a Zone object")
 
         params = {
-            "zoneId": zoneId + 1,  # Lares uses index starting with 1
+            "zoneId": zone_id + 1,  # Lares uses index starting with 1
             "zoneValue": 1 if bypass == ZoneBypass.ON else 0,
         }
 
