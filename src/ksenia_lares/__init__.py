@@ -3,9 +3,9 @@
 from .base_api import BaseApi
 from .ip_api import IpAPI
 
-def initialize(config: dict) -> BaseApi:
+def get_api(config: dict) -> BaseApi:
     """
-    Initialize API based on the API version
+    Get and initialize the correct API class based on the `api_version` given. 
     Args:
             config (dict): A dictionary containing the following keys:
                 - api_version (str): IP for IP range or 4 for Lares 4.0.
