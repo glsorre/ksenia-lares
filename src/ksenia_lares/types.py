@@ -73,7 +73,7 @@ class Scenario:
     id: int
     description: str
     enabled: bool
-    noPin: bool
+    no_pin: bool
 
 
 class Command(Enum):

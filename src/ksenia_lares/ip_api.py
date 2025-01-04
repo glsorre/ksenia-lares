@@ -137,7 +137,7 @@ class IpAPI(BaseApi):
                 id=index,
                 description=descriptions[index],
                 enabled=scenario.find("abil").text.upper() == "TRUE",
-                noPin=scenario.find("nopin").text.upper() == "TRUE",
+                no_pin=scenario.find("nopin").text.upper() == "TRUE",
             )
             for index, scenario in enumerate(scenarios)
         ]
@@ -150,7 +150,7 @@ class IpAPI(BaseApi):
 
         Args:
             scenario (int | Scenario): Thescenario to activate, by ID or from a retrieved scenario
-            pin (Optional[str]): The pin code for the alarm, if the scenario doesn't have `NoPin` set, this is required.
+            pin (Optional[str]): The pin code for the alarm, if the scenario doesn't have `no_pin` set, this is required.
 
         Returns:
             bool: `True` when the scenario is actived, `False` if any issue occured.
@@ -165,7 +165,7 @@ class IpAPI(BaseApi):
             raise TypeError("Input must be an int (scenario ID) or a Scenario object")
 
         # Validate if PIN is required
-        if pin is None and not current.noPin:
+        if pin is None and not current.no_pin:
             raise ValueError(f"PIN is required for scenario {current.description}")
 
         params = {"macroId": current.id}

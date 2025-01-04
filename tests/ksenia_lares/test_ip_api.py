@@ -309,17 +309,17 @@ async def test_get_scenarios_successfull(mock_config, mock_xml_responses):
         assert result[0].description == "Turn off"
         assert result[0].id == 0
         assert result[0].enabled == True
-        assert result[0].noPin == True
+        assert result[0].no_pin == True
 
         assert result[1].description == "Alarm on"
         assert result[1].id == 1
         assert result[1].enabled == True
-        assert result[1].noPin == False
+        assert result[1].no_pin == False
 
         assert result[2].description == "Scenario"
         assert result[2].id == 2
         assert result[2].enabled == False
-        assert result[2].noPin == False
+        assert result[2].no_pin == False
 
 
 @pytest.mark.asyncio
@@ -332,7 +332,7 @@ async def test_activate_scenario_successfull(mock_config, mock_xml_responses):
         )
 
         api = IpAPI(mock_config)
-        test_scenario = Scenario(id=1, description="Test", enabled=True, noPin=True)
+        test_scenario = Scenario(id=1, description="Test", enabled=True, no_pin=True)
 
         result = await api.activate_scenario(scenario=test_scenario, pin=None)
 
@@ -343,7 +343,7 @@ async def test_activate_scenario_successfull(mock_config, mock_xml_responses):
 @pytest.mark.asyncio
 async def test_activate_scenario_missingPin(mock_config):
     api = IpAPI(mock_config)
-    test_scenario = Scenario(id=1, description="Test", enabled=True, noPin=False)
+    test_scenario = Scenario(id=1, description="Test", enabled=True, no_pin=False)
 
     with pytest.raises(ValueError):
         await api.activate_scenario(scenario=test_scenario, pin=None)
