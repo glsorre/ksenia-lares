@@ -74,3 +74,10 @@ class Scenario:
     description: str
     enabled: bool
     noPin: bool
+
+
+class Command(Enum):
+    "Alarm commands."
+
+    SET_MACRO = "setMacro"
+    SET_BYPASS = "setByPassZone"

@@ -3,7 +3,7 @@ from aiohttp import ClientError
 import pytest
 from aioresponses import aioresponses
 from ksenia_lares import IpAPI
-from ksenia_lares.types import PartitionStatus, ZoneBypass, ZoneStatus
+from ksenia_lares.types import PartitionStatus, Scenario, Zone, ZoneBypass, ZoneStatus
 
 
 @pytest.fixture
@@ -85,6 +85,12 @@ def mock_xml_responses():
                 <nopin>FALSE</nopin>
             </scenario>
         </scenariosOptions>
+        """,
+        "CommandSuccess": """
+        <cmd>cmdSent</cmd>        
+        """,
+        "CommandFailed": """
+        <cmd>Command failed, error error error</cmd>        
         """,
     }
 
@@ -314,3 +320,139 @@ async def test_get_scenarios_successfull(mock_config, mock_xml_responses):
         assert result[2].id == 2
         assert result[2].enabled == False
         assert result[2].noPin == False
+
+
+@pytest.mark.asyncio
+async def test_activate_scenario_successfull(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setMacro&redirectPage=/xml/cmd/cmdError.xml&macroId=1",
+            body=mock_xml_responses["CommandSuccess"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+        test_scenario = Scenario(id=1, description="Test", enabled=True, noPin=True)
+
+        result = await api.activate_scenario(scenario=test_scenario, pin=None)
+
+        mocked.assert_called
+        assert result == True
+
+
+@pytest.mark.asyncio
+async def test_activate_scenario_missingPin(mock_config):
+    api = IpAPI(mock_config)
+    test_scenario = Scenario(id=1, description="Test", enabled=True, noPin=False)
+
+    with pytest.raises(ValueError):
+        await api.activate_scenario(scenario=test_scenario, pin=None)
+
+
+@pytest.mark.asyncio
+async def test_activate_scenario_gets_details_for_id(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setMacro&redirectPage=/xml/cmd/cmdError.xml&macroId=0",
+            body=mock_xml_responses["CommandSuccess"],
+            content_type="text/xml",
+        )
+
+        mocked.get(
+            "http://192.168.1.1:8080/xml/info/generalInfo.xml",
+            body=mock_xml_responses["info/generalInfo.xml"],
+            content_type="text/xml",
+        )
+
+        mocked.get(
+            "http://192.168.1.1:8080/xml/scenarios/scenariosOptions.xml",
+            body=mock_xml_responses["scenariosOptions.xml"],
+            content_type="text/xml",
+        )
+
+        mocked.get(
+            "http://192.168.1.1:8080/xml/scenarios/scenariosDescription.xml",
+            body=mock_xml_responses["scenariosDescription.xml"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+
+        result = await api.activate_scenario(scenario=0, pin=None)
+
+        mocked.assert_called
+        assert result
+
+
+@pytest.mark.asyncio
+async def test_bypass_zone_for_bypass(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setByPassZone&redirectPage=/xml/cmd/cmdError.xml&pin=123&zoneId=1&zoneValue=1",
+            body=mock_xml_responses["CommandSuccess"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+        test_zone = Zone(
+            id=0, description="test", status=ZoneStatus.NORMAL, bypass=ZoneBypass.ON
+        )
+
+        result = await api.bypass_zone(zone=test_zone, pin="123", bypass=ZoneBypass.ON)
+
+        mocked.assert_called
+        assert result == True
+
+
+@pytest.mark.asyncio
+async def test_bypass_zone_for_unbypass(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setByPassZone&redirectPage=/xml/cmd/cmdError.xml&pin=123&zoneId=1&zoneValue=0",
+            body=mock_xml_responses["CommandSuccess"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+        test_zone = Zone(
+            id=0, description="test", status=ZoneStatus.NORMAL, bypass=ZoneBypass.ON
+        )
+
+        result = await api.bypass_zone(zone=test_zone, pin="123", bypass=ZoneBypass.OFF)
+
+        mocked.assert_called
+        assert result == True
+
+
+@pytest.mark.asyncio
+async def test_bypass_zone_with_id(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setByPassZone&redirectPage=/xml/cmd/cmdError.xml&pin=123&zoneId=1&zoneValue=1",
+            body=mock_xml_responses["CommandSuccess"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+
+        result = await api.bypass_zone(zone=0, pin="123", bypass=ZoneBypass.ON)
+
+        mocked.assert_called
+        assert result == True
+
+
+@pytest.mark.asyncio
+async def test_bypass_zone_failed(mock_config, mock_xml_responses):
+    with aioresponses() as mocked:
+        mocked.get(
+            "http://192.168.1.1:8080/xml/cmd/cmdOk.xml?cmd=setByPassZone&redirectPage=/xml/cmd/cmdError.xml&pin=123&zoneId=1&zoneValue=1",
+            body=mock_xml_responses["CommandFailed"],
+            content_type="text/xml",
+        )
+
+        api = IpAPI(mock_config)
+
+        result = await api.bypass_zone(zone=0, pin="123", bypass=ZoneBypass.ON)
+
+        mocked.assert_called
+        assert result == False

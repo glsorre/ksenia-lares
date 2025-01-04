@@ -1,11 +1,12 @@
 import logging
-from typing import List
+from typing import List, Optional
 from getmac import get_mac_address
 import aiohttp
 from lxml import etree
 
 from .types import (
     AlarmInfo,
+    Command,
     Partition,
     PartitionStatus,
     Scenario,
@@ -48,7 +49,12 @@ class IpAPI(BaseApi):
         self._description_cache = {}
 
     async def info(self) -> AlarmInfo:
-        """Get info about the alarm system, like name and version"""
+        """
+        Get info about the alarm system, like name and version.
+
+        Returns:
+            AlarmInfo: General information about the alarm system.
+        """
         response = await self._get("info/generalInfo.xml")
         mac = get_mac_address(ip=self._ip)
 
@@ -65,7 +71,12 @@ class IpAPI(BaseApi):
         return info
 
     async def get_zones(self) -> List[Zone]:
-        """Get status of all zones"""
+        """
+        Get status of all zones.
+
+        Returns:
+            List[Zone]: List of the zones in the alarm system.
+        """
         model = await self.get_model()
         response = await self._get(f"zones/zonesStatus{model}.xml")
         zones = response.xpath("/zonesStatus/zone")
@@ -84,7 +95,12 @@ class IpAPI(BaseApi):
         ]
 
     async def get_partitions(self) -> List[Partition]:
-        """Get status of partitions"""
+        """
+        Get status of partitions.
+
+        Returns:
+            List[Partition]: List of the partitions in the alarm system.
+        """
         model = await self.get_model()
         response = await self._get(f"partitions/partitionsStatus{model}.xml")
         partitions = response.xpath("/partitionsStatus/partition")
@@ -103,7 +119,12 @@ class IpAPI(BaseApi):
         ]
 
     async def get_scenarios(self) -> List[Scenario]:
-        """Get status of scenarios"""
+        """
+        Get status of scenarios
+
+        Returns:
+            List[Scenario]: List of the scenarios in the alarm system.
+        """
         response = await self._get("scenarios/scenariosOptions.xml")
         scenarios = response.xpath("/scenariosOptions/scenario")
         descriptions: List[str] = await self._get_descriptions(
@@ -121,27 +142,71 @@ class IpAPI(BaseApi):
             for index, scenario in enumerate(scenarios)
         ]
 
-    async def activate_scenario(self, scenario: int, code: str) -> bool:
-        """Activate the given scenarios, requires the alarm code"""
-        params = {"macroId": scenario}
+    async def activate_scenario(
+        self, scenario: int | Scenario, pin: Optional[str]
+    ) -> bool:
+        """
+        Active the given scenario on the alarm. Can be used to arm or disarm the alarm.
 
-        return await self._send_command("setMacro", code, params)
+        Args:
+            scenario (int | Scenario): Thescenario to activate, by ID or from a retrieved scenario
+            pin (Optional[str]): The pin code for the alarm, if the scenario doesn't have `NoPin` set, this is required.
 
-    async def bypass_zone(self, zone: int, code: str, bypass: bool) -> bool:
-        """Activate the given scenarios, requires the alarm code"""
+        Returns:
+            bool: `True` when the scenario is actived, `False` if any issue occured.
+        """
+
+        if isinstance(scenario, int):
+            scenarios = await self.get_scenarios()
+            current = next(item for item in scenarios if item.id == scenario)
+        elif isinstance(scenario, Scenario):
+            current = scenario  # We trust the data given, the alarm will refuse to execute when PIN is needed and no PIN is available
+        else:
+            raise TypeError("Input must be an int (scenario ID) or a Scenario object")
+
+        # Validate if PIN is required
+        if pin is None and not current.noPin:
+            raise ValueError(f"PIN is required for scenario {current.description}")
+
+        params = {"macroId": current.id}
+        return await self._send_command(Command.SET_MACRO, pin, params)
+
+    async def bypass_zone(self, zone: int | Zone, pin: str, bypass: ZoneBypass) -> bool:
+        """
+        Activates or deactivates the bypass on the given zone.
+
+        Args:
+            zone (int | Zone): The zone or id of the zone to (un)bypass.
+            pin (str): PIN code, required for bypass.
+            bypass (ZoneBypass): Set to bypass or unbypass zone.
+
+        Returns:
+            bool: True if the (un)bypass was executed successfully.
+        """
+
+        if isinstance(zone, Zone):
+            zoneId = zone.id
+        elif isinstance(zone, int):
+            zoneId = zone
+        else:
+            raise TypeError("Zone must be an int (zone ID) or a Zone object")
+
         params = {
-            "zoneId": zone + 1,  # Lares uses index starting with 1
-            "zoneValue": 1 if bypass else 0,
+            "zoneId": zoneId + 1,  # Lares uses index starting with 1
+            "zoneValue": 1 if bypass == ZoneBypass.ON else 0,
         }
 
-        return await self._send_command("setByPassZone", code, params)
+        return await self._send_command(Command.SET_BYPASS, pin, params)
 
     async def get_model(self) -> str:
-        """Get model information"""
+        """
+        Get model of the alarm system
+
+        Returns:
+            str: The model of the alarm system (128IP, 48IP or 16IP)
+        """
         if self._model is None:
             info = await self.info()
-            if info is None:
-                raise RuntimeError("Unable to get info of device")
 
             if info["name"].endswith("128IP"):
                 self._model = "128IP"
@@ -153,13 +218,28 @@ class IpAPI(BaseApi):
         return self._model
 
     async def _send_command(
-        self, command: str, code: str, params: dict[str, int]
+        self, command: Command, pin: Optional[str], params: dict[str, int]
     ) -> bool:
-        """Send Command"""
-        urlparam = "".join(f"&{k}={v}" for k, v in params.items())
-        path = f"cmd/cmdOk.xml?cmd={command}&pin={code}&redirectPage=/xml/cmd/cmdError.xml{urlparam}"
+        """
+        Send command to alarm.
 
-        _LOGGER.debug("Sending command %s", path)
+        Args:
+            command (Command): The command to send.
+            pin (Optional[str]): Optional PIN code, might be required by the specific command.
+            params (dict[str, int]): Additional parameters for the command.
+
+        Returns:
+            bool: True if the command executed successfully.
+        """
+
+        urlparam = "".join(f"&{k}={v}" for k, v in params.items())
+        path = f"cmd/cmdOk.xml?cmd={command.value}&redirectPage=/xml/cmd/cmdError.xml{urlparam}"
+
+        if pin is not None:
+            path += f"&pin={pin}"
+            _LOGGER.debug("Sending command %s", path.replace(pin, "PIN"))
+        else:
+            _LOGGER.debug("Sending command %s", path)
 
         response = await self._get(path)
         cmd = response.xpath("/cmd")
