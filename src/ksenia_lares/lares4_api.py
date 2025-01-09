@@ -1,3 +1,4 @@
+from re import S
 from typing import List
 from unittest.mock import sentinel
 from urllib import response
@@ -21,6 +22,7 @@ from .types import (
     ZoneStatus,
 )
 from .base_api import BaseApi
+from ksenia_lares import base_api
 
 def u(e):
     t = [];
@@ -78,6 +80,7 @@ def get_ssl_context():
     ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
     return ctx
 
+
 class CommandFactory:
     def __init__(self, sender: str, pin: str) -> None:
         self._command_id = 0
@@ -130,23 +133,6 @@ class CommandFactory:
         return command
 
 class Lares4API():
-    def __init__(self, config: dict):
-        if not all(key in config for key in ("url", "pin", "sender")):
-            raise ValueError(
-                "Missing one or more of the following keys: host, pin, sender"
-            )  
-        
-        self.client = Lares4Client(config)
-
-    async def connect_client(self):
-        await self.client.run()
-
-    async def get_scenarios(self) -> List[Scenario] | None:
-        response = await self.client.get_scenarios()
-        if response:
-            return response['PAYLOAD']['SCENARIOS']
-
-class Lares4Client():
     def __init__(self, data):
         if not all(key in data for key in ("url", "pin", "sender")):
             raise ValueError(
@@ -175,15 +161,6 @@ class Lares4Client():
             print(f"Sent: {message}")
         else:
             print("WebSocket is not connected.")
-
-    async def keep_alive(self):
-        while self.is_running:
-            try:
-                await self.ws.ping()
-                await asyncio.sleep(10)
-            except Exception as e:
-                print(f"Error during keep-alive: {e}")
-                break
 
     async def close(self):
         self.is_running = False
@@ -223,13 +200,13 @@ class Lares4Client():
         else:
             print("WebSocket is not connected.")
 
-    async def get(self, cmd: str, payload_type: str, payload: dict) -> dict | None:
+    async def get(self, cmd: str, payload_type: str, payload: dict):
         command = self.command_factory.build_command(cmd, payload_type, payload)
         await self.send_message(command)
         response = await self.receive()
         return response
 
-    async def receive(self) -> dict | None:
+    async def receive(self):
         if self.ws:
             msg = await self.ws.receive()
             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -238,7 +215,48 @@ class Lares4Client():
         else:
             print("WebSocket is not connected.")
 
-    async def get_scenarios(self) -> dict | None:
+    async def info(self):
+        info = await self.get(
+            'REALTIME',
+            'REGISTER',
+            {
+                'ID_LOGIN': True,
+                'TYPES': ['STATUS_SYSTEM'],
+            }
+        )
+        return info
+    
+    async def get_zones(self):
+        zones = await self.get(
+            "READ",
+            "MULTI_TYPES",
+            {
+                "ID_LOGIN": True,
+                "ID_READ": "1",
+                "TYPES": [
+                    "ZONES"
+                ]
+            }
+        )
+
+        return zones
+    
+    async def get_partitions(self):
+        partitions = await self.get(
+            "READ",
+            "MULTI_TYPES",
+            {
+                "ID_LOGIN": True,
+                "ID_READ": "1",
+                "TYPES": [
+                    "PARTITIONS"
+                ]
+            }
+        )
+
+        return partitions
+
+    async def get_scenarios(self):
         scenarios = await self.get(
             "READ",
             "MULTI_TYPES",
@@ -250,4 +268,6 @@ class Lares4Client():
                 ]
             }
         )
+
         return scenarios
+    
