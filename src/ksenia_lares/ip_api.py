@@ -4,7 +4,7 @@ from getmac import get_mac_address
 import aiohttp
 from lxml import etree
 
-from .types import (
+from .types_ip import (
     AlarmInfo,
     Command,
     Partition,

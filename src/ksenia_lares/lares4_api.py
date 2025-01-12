@@ -1,25 +1,17 @@
-from re import S
-from typing import List
-from unittest.mock import sentinel
-from urllib import response
+
 import aiohttp
 import json
 import ssl
 import time
 import asyncio
-import queue
 
-from aiohttp import ClientWSTimeout, UnixConnector
+from typing import List
 
-from .types import (
-    AlarmInfo,
-    Command,
-    Partition,
-    PartitionStatus,
-    Scenario,
+from .types_lares4 import (
+    Model,
     Zone,
     ZoneBypass,
-    ZoneStatus,
+    ZoneStatus
 )
 from .base_api import BaseApi
 from ksenia_lares import base_api
@@ -133,13 +125,14 @@ class CommandFactory:
         return command
 
 class Lares4API():
-    def __init__(self, data):
+    def __init__(self, data, model: Model = Model.LARES_4):
         if not all(key in data for key in ("url", "pin", "sender")):
             raise ValueError(
                 "Missing one or more of the following keys: host, pin, sender"
             )                                                                                                                                                                                                                                     
         self.url = data["url"]
         self.host = f"wss://{data['url']}/KseniaWsock"
+        self.model = model
         self.command_factory = CommandFactory(
             data["sender"], data["pin"]
         )
@@ -180,7 +173,7 @@ class Lares4API():
     async def send_login(self):
         login_command = self.command_factory.build_command(
             cmd="LOGIN",
-            payload_type="UNKNOWN",
+            payload_type="UNKNOWN" if self.model == Model.LARES_4 else "USER",
             payload={
                 "PIN": True
             }
@@ -200,13 +193,13 @@ class Lares4API():
         else:
             print("WebSocket is not connected.")
 
-    async def get(self, cmd: str, payload_type: str, payload: dict):
+    async def get(self, cmd: str, payload_type: str, payload: dict) -> dict | None:
         command = self.command_factory.build_command(cmd, payload_type, payload)
         await self.send_message(command)
         response = await self.receive()
         return response
-
-    async def receive(self):
+    
+    async def receive(self) -> dict | None:
         if self.ws:
             msg = await self.ws.receive()
             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -221,12 +214,14 @@ class Lares4API():
             'REGISTER',
             {
                 'ID_LOGIN': True,
-                'TYPES': ['STATUS_SYSTEM'],
+                'TYPES': [
+                    'STATUS_SYSTEM'
+                ],
             }
         )
         return info
     
-    async def get_zones(self):
+    async def get_zones(self) -> List[Zone]:
         zones = await self.get(
             "READ",
             "MULTI_TYPES",
@@ -234,12 +229,27 @@ class Lares4API():
                 "ID_LOGIN": True,
                 "ID_READ": "1",
                 "TYPES": [
-                    "ZONES"
+                    "STATUS_ZONES"
                 ]
             }
         )
 
-        return zones
+        if zones:
+            status_zones = zones['PAYLOAD']['STATUS_ZONES']
+            return [
+                Zone(
+                    id=zone['ID'],
+                    status=ZoneStatus(zone['STA']),
+                    bypass=ZoneBypass(zone['BYP']),
+                    tamper=zone['T'],
+                    alarm=zone['A'],
+                    ohm=zone['OHM'],
+                    vas=zone['VAS'],
+                    label=zone['LBL'],
+                )
+                for zone in status_zones
+            ]
+        return []
     
     async def get_partitions(self):
         partitions = await self.get(
@@ -249,7 +259,7 @@ class Lares4API():
                 "ID_LOGIN": True,
                 "ID_READ": "1",
                 "TYPES": [
-                    "PARTITIONS"
+                    "STATUS_PARTITIONS"
                 ]
             }
         )
@@ -264,10 +274,41 @@ class Lares4API():
                 "ID_LOGIN": True,
                 "ID_READ": "1",
                 "TYPES": [
-                    "SCENARIOS"
+                    "STATUS_SCENARIOS"
                 ]
             }
         )
 
         return scenarios
     
+    async def activate_scenario(self, scenario_id):
+        scenario = await self.get(
+            "CMD_USR",
+            "CMD_EXE_SCENARIO",
+            {
+                "ID_LOGIN": True,
+                "PIN": True,
+                "SCENARION": {
+                    "ID": scenario_id,
+                }
+            }
+        )
+
+        return scenario
+    
+    async def bypass_zone(self, zone: int | Zone, zone_bypass: ZoneBypass) -> bool:
+        bypass_zone = await self.get(
+            "CMD_USR",
+            "CMD_BYP_ZONE",
+            {
+                "ID_LOGIN": True,
+                "PIN": True,
+                "ZONE": {
+                    "ID": zone.id if isinstance(zone, Zone) else zone,
+                    "BYP": zone_bypass
+                }
+            }
+        )
+        if bypass_zone:
+            return bypass_zone['PAYLOAD']['RESULT'] == 'OK'
+        return False

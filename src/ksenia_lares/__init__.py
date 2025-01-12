@@ -17,6 +17,7 @@ def get_api(config: dict) -> BaseApi:
         return IpAPI(config)
 
     if version == "4":
-        return Lares4API(config)
+        raise
+        #return Lares4API(config)
 
     raise ValueError(f"Unsupported API version: {version}")
