@@ -64,7 +64,7 @@ class BaseApi(ABC):
         pass
 
     @abstractmethod
-    async def bypass_zone(self, zone: int | ZoneIP, pin: str, bypass: ZoneBypass) -> bool:
+    async def bypass_zone(self, zone: int | ZoneIP | ZoneLares4, pin: str, bypass: ZoneBypass) -> bool:
         """
         Activates or deactivates the bypass on the given zone.
 
