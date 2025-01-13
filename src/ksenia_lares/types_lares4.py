@@ -1,7 +1,8 @@
+from argparse import ArgumentDefaultsHelpFormatter
 from dataclasses import dataclass
 from enum import Enum
-from signal import alarm
 from typing import Optional, TypedDict
+from unicodedata import category
 
 class ZoneStatus(Enum):
     """Bypass of alarm zone."""
@@ -36,4 +37,27 @@ class Zone:
 
     @property
     def enabled(self):
-        return self.status == ZoneStatus.READY
+        return self.status == ZoneStatus.ARMED
+
+@dataclass
+class Partition:
+    """Alarm partition."""
+
+    id: int
+    armed: str
+    tamper: str
+    alarm: str
+    test: str
+
+    @property
+    def enabled(self):
+        return self.armed != "D"
+    
+@dataclass
+class Scenario:
+    """Alarm scenario."""
+
+    id: int
+    description: str
+    pin: str
+    category: str

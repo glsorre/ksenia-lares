@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from ksenia_lares.types_ip import AlarmInfo, Partition, Scenario, Zone as ZoneIP, ZoneBypass
-from ksenia_lares.types_lares4 import Zone as ZoneLares4
-
+from ksenia_lares.types_ip import AlarmInfo, Partition, Scenario, Zone, ZoneBypass
 
 class BaseApi(ABC):
     """Base API for the Ksenia Lares"""
@@ -18,7 +16,7 @@ class BaseApi(ABC):
         pass
 
     @abstractmethod
-    async def get_zones(self) -> List[ZoneIP] | List[ZoneLares4]:
+    async def get_zones(self) -> List[Zone]:
         """
         Get status of all zones.
 
@@ -64,7 +62,7 @@ class BaseApi(ABC):
         pass
 
     @abstractmethod
-    async def bypass_zone(self, zone: int | ZoneIP | ZoneLares4, pin: str, bypass: ZoneBypass) -> bool:
+    async def bypass_zone(self, zone: int | Zone, pin: str, bypass: ZoneBypass) -> bool:
         """
         Activates or deactivates the bypass on the given zone.
 

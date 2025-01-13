@@ -11,10 +11,11 @@ from .types_lares4 import (
     Model,
     Zone,
     ZoneBypass,
-    ZoneStatus
+    ZoneStatus,
+    Partition,
+    Scenario
 )
 from .base_api import BaseApi
-from ksenia_lares import base_api
 
 def u(e):
     t = [];
@@ -238,7 +239,7 @@ class Lares4API():
             status_zones = zones['PAYLOAD']['STATUS_ZONES']
             return [
                 Zone(
-                    id=zone['ID'],
+                    id=int(zone['ID']),
                     status=ZoneStatus(zone['STA']),
                     bypass=ZoneBypass(zone['BYP']),
                     tamper=zone['T'],
@@ -251,7 +252,7 @@ class Lares4API():
             ]
         return []
     
-    async def get_partitions(self):
+    async def get_partitions(self) -> List[Partition]:
         partitions = await self.get(
             "READ",
             "MULTI_TYPES",
@@ -264,7 +265,19 @@ class Lares4API():
             }
         )
 
-        return partitions
+        if partitions:
+            status_partitions = partitions['PAYLOAD']['STATUS_PARTITIONS']
+            return [
+                Partition(
+                    id=int(partition['ID']),
+                    armed=partition['ARM'],
+                    tamper=partition['T'],
+                    alarm=partition['AST'],
+                    test=partition['TST']
+                )
+                for partition in status_partitions
+            ]
+        return []
 
     async def get_scenarios(self):
         scenarios = await self.get(
@@ -274,12 +287,22 @@ class Lares4API():
                 "ID_LOGIN": True,
                 "ID_READ": "1",
                 "TYPES": [
-                    "STATUS_SCENARIOS"
+                    "SCENARIOS"
                 ]
             }
         )
-
-        return scenarios
+        if scenarios:
+            status_scenarios = scenarios['PAYLOAD']['SCENARIOS']
+            return [
+                Scenario(
+                    id=int(scenario['ID']),
+                    description=scenario['DES'],
+                    pin=scenario['PIN'],
+                    category=scenario['CAT'],
+                )
+                for scenario in status_scenarios
+            ]
+        return []
     
     async def activate_scenario(self, scenario_id):
         scenario = await self.get(
