@@ -42,6 +42,12 @@ class ThermostatMode(Enum):
     SPECIAL_1 = "SD1"
     SPECIAL_2 = "SD2"
 
+class EventType(Enum):
+    OUTPUTS = "STATUS_OUTPUTS"
+    SYSTEM = "STATUS_SYSTEM"
+    PERIPHERAL = "STATUS_BUS_HA_SENSORS"
+    TEMPERATURES = "STATUS_TEMPERATURES"
+
 @dataclass
 class Zone:
     """Alarm zone."""

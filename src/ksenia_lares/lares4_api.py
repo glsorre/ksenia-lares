@@ -5,10 +5,9 @@ import ssl
 import time
 import asyncio
 
-from typing import List
+from typing import Callable, List
 
-from .types_lares4 import BusPeripheral, BusPeripheralStatus, BusPeripheralType, DomusStatus, LinkStatus, Model, Output, OutputStatus, SystemArmStatus, SystemStatus, SystemTemperatureStatus, SystemTimeStatus, TemperatureStatus, ThermostatMode, ThermostatSeason, ThermostatStatus, Zone, ZoneBypass, ZoneStatus, Partition, Scenario
-from .base_api import BaseApi
+from .types_lares4 import BusPeripheral, BusPeripheralStatus, BusPeripheralType, DomusStatus, EventType, LinkStatus, Model, Output, OutputStatus, SystemArmStatus, SystemStatus, SystemTemperatureStatus, SystemTimeStatus, TemperatureStatus, ThermostatMode, ThermostatSeason, ThermostatStatus, Zone, ZoneBypass, ZoneStatus, Partition, Scenario
 
 
 def u(e):
@@ -37,7 +36,6 @@ def u(e):
 
     return t
 
-
 def crc16(e):
     i = u(e)
     l = e.rfind('"CRC_16"') + len('"CRC_16"') + (len(i) - len(e))
@@ -61,14 +59,12 @@ def crc16(e):
         s = s + 1
     return "0x" + format(r, "04x")
 
-
 def get_ssl_context():
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
     return ctx
-
 
 class CommandFactory:
     def __init__(self, sender: str, pin: str) -> None:
@@ -96,7 +92,6 @@ class CommandFactory:
         return self._command_id
 
     def build_payload(self, payload: dict) -> dict:
-        print(getattr(payload, "PIN", False))
         return {
             **payload,
             **({"ID_LOGIN": self.get_login_id()} if "ID_LOGIN" in payload else {}),
@@ -134,6 +129,8 @@ class Lares4API:
         self.command_factory = CommandFactory(data["sender"], data["pin"])
         self.is_running = False
 
+        self.event_listeners: dict[EventType, list[Callable]] = {}
+
     async def connect(self):
         self.session = aiohttp.ClientSession()
         self.ws = await self.session.ws_connect(
@@ -141,13 +138,27 @@ class Lares4API:
         )
         print(f"Connected to {self.url}")
         self.is_running = True
-
-    async def send_message(self, message):
+                
+    async def command(self, cmd: str, payload_type: str, payload: dict) -> dict | None:
+        send_command = asyncio.create_task(self.send_command(cmd, payload_type, payload))
+        receive_command = asyncio.create_task(self.receive_command())
+        _, response = await asyncio.gather(send_command, receive_command)
+        return response 
+        
+    async def send_command(self, cmd: str, payload_type: str, payload: dict):
         if self.ws:
-            await self.ws.send_json(message)
-            print(f"Sent: {message}")
+            command = self.command_factory.build_command(cmd, payload_type, payload)
+            print(f"Sending command: {command}")
+            await self.ws.send_json(command)
         else:
-            print("WebSocket is not connected.")
+            raise Exception("WebSocket is not connected")
+        
+    async def receive_command(self) -> dict | None:
+        if self.ws:
+            msg = await self.ws.receive_json()
+            return msg
+        else:
+            raise Exception("WebSocket is not connected")
 
     async def close(self):
         self.is_running = False
@@ -155,64 +166,33 @@ class Lares4API:
             await self.ws.close()
         if self.session:
             await self.session.close()
-        print("Connection closed")
 
-    async def run(self):
-        await self.connect()
-
+    async def login(self):
+        send_login = asyncio.create_task(self.send_login())
         receive_login = asyncio.create_task(self.receive_login())
-        login = asyncio.create_task(self.send_login())
-        await asyncio.gather(receive_login, login)
+        await asyncio.gather(send_login, receive_login)
 
     async def send_login(self):
-        login_command = self.command_factory.build_command(
-            cmd="LOGIN",
-            payload_type="UNKNOWN" if self.model == Model.LARES_4 else "USER",
-            payload={"PIN": True},
+        await self.send_command(
+            "LOGIN",
+            "UNKNOWN" if self.model == Model.LARES_4 else "USER",
+            { "PIN": True }
         )
-        await self.send_message(login_command)
 
-    async def receive_login(self):
+    async def receive_login(self, timeout: float = 0.7):
         if self.ws:
-            msg = await asyncio.wait_for(self.ws.receive(), timeout=1.0)
+            msg = await asyncio.wait_for(self.ws.receive(), timeout=timeout)
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
-                print(data)
                 if data["CMD"] == "LOGIN_RES":
                     self.command_factory.set_login_id(data["PAYLOAD"]["ID_LOGIN"])
                 else:
-                    print("Login failed")
+                    raise Exception("Login failed")
         else:
-            print("WebSocket is not connected.")
-
-    async def get(self, cmd: str, payload_type: str, payload: dict) -> dict | None:
-        command = self.command_factory.build_command(cmd, payload_type, payload)
-        await self.send_message(command)
-        response = await self.receive()
-        return response
-
-    async def receive(self) -> dict | None:
-        if self.ws:
-            msg = await self.ws.receive()
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                data = json.loads(msg.data)
-                return data
-        else:
-            print("WebSocket is not connected.")
-
-    async def info(self):
-        info = await self.get(
-            "REALTIME",
-            "REGISTER",
-            {
-                "ID_LOGIN": True,
-                "TYPES": ["STATUS_SYSTEM"],
-            },
-        )
-        return info
+            raise Exception("WebSocket is not connected")
 
     async def get_zones(self) -> List[Zone]:
-        zones_response = await self.get(
+        zones_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_ZONES"]},
@@ -235,7 +215,7 @@ class Lares4API:
         return []
 
     async def get_partitions(self) -> List[Partition]:
-        partitions_response = await self.get(
+        partitions_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_PARTITIONS"]},
@@ -255,13 +235,12 @@ class Lares4API:
         return []
 
     async def get_scenarios(self):
-        scenarios_response = await self.get(
+        scenarios_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["SCENARIOS"]},
         )
         if scenarios_response and scenarios_response["PAYLOAD"]["RESULT"] == 'OK':
-            scenarios = scenarios_response["PAYLOAD"]["SCENARIOS"]
             return [
                 Scenario(
                     id=int(scenario["ID"]),
@@ -269,12 +248,12 @@ class Lares4API:
                     pin=scenario["PIN"],
                     category=scenario["CAT"],
                 )
-                for scenario in scenarios
+                for scenario in scenarios_response["PAYLOAD"]["SCENARIOS"]
             ]
         return []
 
     async def activate_scenario(self, scenario_id):
-        scenario = await self.get(
+        scenario = await self.command(
             "CMD_USR",
             "CMD_EXE_SCENARIO",
             {
@@ -289,7 +268,7 @@ class Lares4API:
         return scenario
 
     async def bypass_zone(self, zone: int | Zone, zone_bypass: ZoneBypass) -> bool:
-        bypass_zone = await self.get(
+        bypass_zone = await self.command(
             "CMD_USR",
             "CMD_BYP_ZONE",
             {
@@ -306,7 +285,7 @@ class Lares4API:
         return False
     
     async def setOutput(self, id: int, value: str | int) -> bool:
-        set_output = await self.get(
+        set_output = await self.command(
             "CMD_USR",
             "CMD_SET_OUTPUT",
             {
@@ -323,7 +302,7 @@ class Lares4API:
         return False
 
     async def get_outputs(self) -> list[Output]:
-        outputs_response = await self.get(
+        outputs_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["OUTPUTS"],},
@@ -343,7 +322,7 @@ class Lares4API:
         return []
     
     async def get_bus_peripherals(self) -> List[BusPeripheral]:
-        peripherals_response = await self.get(
+        peripherals_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["BUS_HAS"],},
@@ -361,7 +340,7 @@ class Lares4API:
         return []
     
     async def get_outputs_status(self) -> list[OutputStatus]:
-        outputs_status_response = await self.get(
+        outputs_status_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_OUTPUTS"],},
@@ -372,15 +351,15 @@ class Lares4API:
                 OutputStatus(
                     id=int(output["ID"]),
                     status=output["STA"],
-                    position=(int(output["POS"]) if output['POS'] else None),
-                    target_position=(int(output["TPOS"]) if output['TPOS'] else None),
+                    position=(int(output["POS"]) if "POS" in output.keys()  else None),
+                    target_position=(int(output["TPOS"]) if "TPOS" in output.keys() else None),
                 )
                 for output in outputs_status_response["PAYLOAD"]["STATUS_OUTPUTS"]
             ]
         return []
     
     async def get_systems_status(self) -> list[SystemStatus]:
-        systems_status_response = await self.get(
+        systems_status_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_SYSTEM"],},
@@ -430,7 +409,7 @@ class Lares4API:
     
     async def get_peripherals_status(self) -> List[BusPeripheralStatus]:
         """Get peripherals status."""
-        pheripehral_status_response = await self.get(
+        pheripehral_status_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_BUS_HA_SENSORS"],},
@@ -463,7 +442,7 @@ class Lares4API:
     
     async def get_temperatures_status(self) -> List[TemperatureStatus]:
         """Get temperatures status."""
-        temperature_status_response = await self.get(
+        temperature_status_response = await self.command(
             "READ",
             "MULTI_TYPES",
             {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_TEMPERATURES"],},
@@ -492,3 +471,52 @@ class Lares4API:
                 )
 
         return temperatures
+    
+    async def add_event_listener(self, event: EventType, event_listener: Callable[[str], None]) -> None:
+        """Add event listener."""
+        register_event_response = await self.send_command(
+            "REALTIME",
+            "REGISTER",
+            {"ID_LOGIN": True, "TYPES": [event.value]},
+        )
+
+        if register_event_response and register_event_response["PAYLOAD"]["RESULT"] == "OK":
+            if event not in self.event_listeners.keys():
+                self.event_listeners[event] = []
+            self.event_listeners[event].append(event_listener)
+        else:
+            raise Exception("Failed to register event listener")
+        
+    def remove_event_listener(self, event: EventType, event_listener: Callable[[str], None]) -> None:
+        """Remove event listener."""
+        if event in self.event_listeners:
+            self.event_listeners[event].remove(event_listener)
+            if not self.event_listeners[event]:
+                del self.event_listeners[event]
+
+    async def listen(self) -> None:
+        """Start listening for events."""
+        if not self.ws:
+            raise Exception("WebSocket is not connected")
+        
+        async for msg in self.ws:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                data = json.loads(msg.data)
+                if data["PAYLOAD_TYPE"] == "CHANGES":
+                    if self.command_factory._sender in data["PAYLOAD"].keys():
+                        for event in self.event_listeners.keys():
+                            if event.value in data["PAYLOAD"][self.command_factory._sender].keys():
+                                for listener in self.event_listeners[event]:
+                                    listener(data["PAYLOAD"][self.command_factory._sender][event.value])
+
+    async def logout(self) -> None:
+        logout_response = await self.command(
+            "LOGOUT",
+            "USER",
+            {"ID_LOGIN": True},
+        )
+
+        if logout_response and logout_response["CMD"] == "LOGOUT_RES":
+            await self.close()
+        else:
+            raise Exception("Failed to logout")
