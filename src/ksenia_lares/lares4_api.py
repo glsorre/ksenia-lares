@@ -1,4 +1,5 @@
 import datetime
+from operator import ge
 import aiohttp
 import json
 import ssl
@@ -7,7 +8,11 @@ import asyncio
 
 from typing import Callable, List
 
-from .types_lares4 import BusPeripheral, BusPeripheralStatus, BusPeripheralType, DomusStatus, EventType, LinkStatus, Model, Output, OutputStatus, SystemArmStatus, SystemStatus, SystemTemperatureStatus, SystemTimeStatus, TemperatureStatus, ThermostatMode, ThermostatSeason, ThermostatStatus, Zone, ZoneBypass, ZoneStatus, Partition, Scenario
+import ksenia_lares
+from ksenia_lares.readers import read_outputs, read_outputs_status, read_partitions_status, read_peripherals, read_peripherals_status, read_scenarios, read_systems_status, read_temperatures_status, read_zones_status
+import ksenia_lares.readers
+
+from .types_lares4 import BusPeripheral, BusPeripheralStatus, BusPeripheralType, DomusStatus, EventType, LinkStatus, Model, Output, OutputStatus, ReadCallable, ReadType, SystemArmStatus, SystemStatus, SystemTemperatureStatus, SystemTimeStatus, TemperatureStatus, ThermostatMode, ThermostatSeason, ThermostatStatus, Zone, ZoneBypass, ZoneStatus, Partition, Scenario
 
 
 def u(e):
@@ -116,7 +121,6 @@ class CommandFactory:
 
         return command
 
-
 class Lares4API:
     def __init__(self, data, model: Model = Model.LARES_4):
         if not all(key in data for key in ("url", "pin", "sender")):
@@ -159,6 +163,41 @@ class Lares4API:
             return msg
         else:
             raise Exception("WebSocket is not connected")
+        
+    async def get(self, read_types: list[ReadType]) -> list[dict]:
+        await self.send_command(
+            "READ",
+            "MULTI_TYPES",
+            {
+                "ID_LOGIN": True,
+                "ID_READ": "1",
+                "TYPES": [read_type.value for read_type in read_types]
+            }
+        )
+
+        results = []
+        response = await self.receive_command()
+        
+        if response and response["PAYLOAD"]["RESULT"] == "OK":
+            for read_type in read_types:
+                print(f"Reading {read_type.value}")
+                print(ReadCallable[read_type.value])
+                callable = getattr(ksenia_lares.readers, ReadCallable[read_type.value].value)
+                results.append(callable(response["PAYLOAD"][read_type.value]))
+
+        return results
+
+    async def receive_commands(self, len = 1):
+        results = []
+
+        if self.ws:
+            for _ in range(len):
+                msg = await self.ws.receive_json()
+                print(f"Received command: {msg}")
+                results.append(msg)
+            return results
+        else:
+            raise Exception("WebSocket is not connected")
 
     async def close(self):
         self.is_running = False
@@ -192,65 +231,67 @@ class Lares4API:
             raise Exception("WebSocket is not connected")
 
     async def get_zones(self) -> List[Zone]:
-        zones_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_ZONES"]},
-        )
-
-        if zones_response and zones_response["PAYLOAD"]["RESULT"] == 'OK':
-            return [
-                Zone(
-                    id=int(zone["ID"]),
-                    status=ZoneStatus(zone["STA"]),
-                    bypass=ZoneBypass(zone["BYP"]),
-                    tamper=zone["T"],
-                    alarm=zone["A"],
-                    ohm=zone["OHM"],
-                    vas=zone["VAS"],
-                    label=zone["LBL"],
-                )
-                for zone in zones_response["PAYLOAD"]["STATUS_ZONES"]
-            ]
-        return []
-
+        zones_response = await self.get([ReadType.STATUS_ZONES])
+        if zones_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_zones_status(zones_response[0]["PAYLOAD"][ReadType.STATUS_ZONES.value])
+        else:
+            raise Exception("Failed to get zones")
+    
     async def get_partitions(self) -> List[Partition]:
-        partitions_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_PARTITIONS"]},
-        )
-
-        if partitions_response:
-            return [
-                Partition(
-                    id=int(partition["ID"]),
-                    armed=partition["ARM"],
-                    tamper=partition["T"],
-                    alarm=partition["AST"],
-                    test=partition["TST"],
-                )
-                for partition in partitions_response["PAYLOAD"]["STATUS_PARTITIONS"]
-            ]
-        return []
+        partitions_response = await self.get([ReadType.STATUS_PARTITIONS])
+        if partitions_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_partitions_status(partitions_response[0]["PAYLOAD"][ReadType.STATUS_PARTITIONS.value])
+        else:
+            raise Exception("Failed to get partitions")
 
     async def get_scenarios(self):
-        scenarios_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["SCENARIOS"]},
-        )
-        if scenarios_response and scenarios_response["PAYLOAD"]["RESULT"] == 'OK':
-            return [
-                Scenario(
-                    id=int(scenario["ID"]),
-                    description=scenario["DES"],
-                    pin=scenario["PIN"],
-                    category=scenario["CAT"],
-                )
-                for scenario in scenarios_response["PAYLOAD"]["SCENARIOS"]
-            ]
-        return []
+        scenarios_response = await self.get([ReadType.SCENARIOS])
+        if scenarios_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_scenarios(scenarios_response[0]["PAYLOAD"][ReadType.SCENARIOS.value])
+        else:
+            raise Exception("Failed to get scenarios")
+
+    async def get_outputs(self) -> list[Output]:
+        outputs_response = await self.get([ReadType.OUTPUTS])
+        if outputs_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_outputs(outputs_response[0]["PAYLOAD"][ReadType.OUTPUTS.value])
+        else:
+            raise Exception("Failed to get outputs")
+    
+    async def get_peripherals(self) -> List[BusPeripheral]:
+        bus_peripherals_response = await self.get([ReadType.PERIPHERALS])
+        if bus_peripherals_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_peripherals(bus_peripherals_response[0]["PAYLOAD"][ReadType.PERIPHERALS.value])
+        else:
+            raise Exception("Failed to get bus peripherals")
+    
+    async def get_outputs_status(self) -> list[OutputStatus]:
+        outputs_status_response = await self.get([ReadType.STATUS_OUTPUTS])
+        if outputs_status_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_outputs_status(outputs_status_response[0]["PAYLOAD"][ReadType.STATUS_OUTPUTS.value])
+        else:
+            raise Exception("Failed to get outputs status")
+    
+    async def get_systems_status(self) -> list[SystemStatus]:
+        systems_status_response = await self.get([ReadType.STATUS_SYSTEMS])
+        if systems_status_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_systems_status(systems_status_response[0]["PAYLOAD"][ReadType.STATUS_SYSTEMS.value])
+        else:
+            raise Exception("Failed to get systems status")
+
+    async def get_peripherals_status(self) -> List[BusPeripheralStatus]:
+        peripherals_status_response = await self.get([ReadType.STATUS_PERIPHERALS])
+        if peripherals_status_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_peripherals_status(peripherals_status_response[0]["PAYLOAD"][ReadType.STATUS_PERIPHERALS.value])
+        else:
+            raise Exception("Failed to get peripherals status")
+    
+    async def get_temperatures_status(self) -> List[TemperatureStatus]:
+        temperatures_status_response = await self.get([ReadType.STATUS_TEMPERATURES])
+        if temperatures_status_response[0]["PAYLOAD"]["RESULT"] == "OK":
+            return read_temperatures_status(temperatures_status_response[0]["PAYLOAD"][ReadType.STATUS_TEMPERATURES.value])
+        else:
+            raise Exception("Failed to get temperatures status")
 
     async def activate_scenario(self, scenario_id):
         scenario = await self.command(
@@ -300,177 +341,6 @@ class Lares4API:
         if set_output:
             return set_output["PAYLOAD"]["RESULT"] == "OK"
         return False
-
-    async def get_outputs(self) -> list[Output]:
-        outputs_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["OUTPUTS"],},
-        )
-
-        if outputs_response and outputs_response["PAYLOAD"]["RESULT"] == "OK":
-            return [
-                Output(
-                    id=int(output["ID"]),
-                    description=output["DES"],
-                    cnv=output["CNV"],
-                    category=output["CAT"],
-                    mode=output["MOD"],
-                )
-                for output in outputs_response["PAYLOAD"]["OUTPUTS"]
-            ]
-        return []
-    
-    async def get_bus_peripherals(self) -> List[BusPeripheral]:
-        peripherals_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["BUS_HAS"],},
-        )
-
-        if peripherals_response and peripherals_response["PAYLOAD"]["RESULT"] == "OK":
-            return [
-                BusPeripheral(
-                    id=int(peripheral["ID"]),
-                    type=BusPeripheralType(peripheral["TYP"]),
-                    description=peripheral["DES"]
-                    )
-                for peripheral in peripherals_response["PAYLOAD"]["BUS_HAS"]
-            ]
-        return []
-    
-    async def get_outputs_status(self) -> list[OutputStatus]:
-        outputs_status_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_OUTPUTS"],},
-        )
-
-        if outputs_status_response and outputs_status_response["PAYLOAD"]["RESULT"] == "OK":
-            return [
-                OutputStatus(
-                    id=int(output["ID"]),
-                    status=output["STA"],
-                    position=(int(output["POS"]) if "POS" in output.keys()  else None),
-                    target_position=(int(output["TPOS"]) if "TPOS" in output.keys() else None),
-                )
-                for output in outputs_status_response["PAYLOAD"]["STATUS_OUTPUTS"]
-            ]
-        return []
-    
-    async def get_systems_status(self) -> list[SystemStatus]:
-        systems_status_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_SYSTEM"],},
-        )
-
-        systems_status = []
-        
-        if systems_status_response and systems_status_response["PAYLOAD"]["RESULT"] == "OK":
-            for system in systems_status_response["PAYLOAD"]["STATUS_SYSTEM"]:
-                dusk =  system["TIME"]["DUSK"].split(':')
-                dawn =  system["TIME"]["DAWN"].split(':')
-                systems_status.append(
-                    SystemStatus(
-                        id=int(system["ID"]),
-                        informations=system["INFO"],
-                        tamper=system["TAMPER"],
-                        tamper_memory=system["TAMPER_MEM"],
-                        alarm=system["ALARM"],
-                        alarm_memory=system["ALARM_MEM"],
-                        fault=system["FAULT"],
-                        fault_memory=system["FAULT_MEM"],
-                        arm=SystemArmStatus(
-                            mode=system["ARM"]["D"],
-                            status=system["ARM"]["S"],
-                        ),
-                        temperature=SystemTemperatureStatus(
-                            inside=float(system["TEMP"]["IN"]) if (system["TEMP"]["IN"] != 'NA') else None,
-                            outside=float(system["TEMP"]["OUT"]) if (system["TEMP"]["OUT"] != 'NA') else None,
-                        ),
-                        time=SystemTimeStatus(
-                            gmt=int(system["TIME"]["GMT"]),
-                            timezone=int(system["TIME"]["TZ"]),
-                            timezone_minutes=(system["TIME"]["TZM"]),
-                            dawn=datetime.time(
-                                hour=int(dawn[0]),
-                                minute=int(dawn[1]),
-                            ),
-                            dusk=datetime.time(
-                                hour=int(dusk[0]),
-                                minute=int(dusk[1]),
-                            ),
-                        ),
-                    )
-                )
-        
-        return systems_status
-    
-    async def get_peripherals_status(self) -> List[BusPeripheralStatus]:
-        """Get peripherals status."""
-        pheripehral_status_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_BUS_HA_SENSORS"],},
-        )
-
-        if pheripehral_status_response and "PAYLOAD" in pheripehral_status_response:
-            return [
-                BusPeripheralStatus(
-                    id=int(peripheral["ID"]),
-                    type=BusPeripheralType(peripheral["TYP"]),
-                    status=peripheral["STA"],
-                    bus=int(peripheral["BUS"]),
-                    link=LinkStatus(
-                        type=peripheral["LINK"]["TYPE"],
-                        serial_number=peripheral["LINK"]["SN"],
-                        bus=int(peripheral["LINK"]["BUS"]),
-                    ),
-                    domus=DomusStatus(
-                        temperature=float(peripheral["DOMUS"]["TEM"]),
-                        humidity=float(peripheral["DOMUS"]["HUM"]),
-                        light=float(peripheral["DOMUS"]["LHT"]),
-                    )
-                    if "DOMUS" in peripheral.keys()
-                    else None,
-                )
-                for peripheral in pheripehral_status_response["PAYLOAD"]["STATUS_BUS_HA_SENSORS"]
-            ]
-        
-        return []
-    
-    async def get_temperatures_status(self) -> List[TemperatureStatus]:
-        """Get temperatures status."""
-        temperature_status_response = await self.command(
-            "READ",
-            "MULTI_TYPES",
-            {"ID_LOGIN": True, "ID_READ": "1", "TYPES": ["STATUS_TEMPERATURES"],},
-        )
-
-        temperatures = []
-
-        if temperature_status_response and temperature_status_response["PAYLOAD"]["RESULT"] == "OK":
-            for temperature in temperature_status_response["PAYLOAD"]["STATUS_TEMPERATURES"]:
-                thermostat_timer= temperature["THERM"]["TEMP_THR"]["VAL"].split(":") if temperature["THERM"]["TEMP_THR"]["VAL"] != 'NA' else None
-                temperatures.append(
-                    TemperatureStatus(
-                        id=int(temperature["ID"]),
-                        temperature=float(temperature["TEMP"]),
-                        thermostat=ThermostatStatus(
-                            season=ThermostatSeason(temperature["THERM"]["ACT_SEA"]),
-                            mode=ThermostatMode(temperature["THERM"]["ACT_MODEL"]),
-                            output=temperature["THERM"]["OUT_STATUS"],
-                            timer=datetime.time(
-                                hour=int(thermostat_timer[0]),
-                                minute=int(thermostat_timer[1])
-                                )
-                                if thermostat_timer else None,
-                        )
-                    )
-                )
-
-        return temperatures
     
     async def add_event_listener(self, event: EventType, event_listener: Callable[[str], None]) -> None:
         """Add event listener."""

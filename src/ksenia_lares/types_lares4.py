@@ -1,11 +1,7 @@
-from argparse import ArgumentDefaultsHelpFormatter
-from ast import Str
-from ctypes import Array
 from dataclasses import dataclass
 from enum import Enum
 from sqlite3 import Time
-from typing import Optional, TypedDict
-from unicodedata import category
+from typing import Optional
 
 class ZoneStatus(Enum):
     """Bypass of alarm zone."""
@@ -44,9 +40,33 @@ class ThermostatMode(Enum):
 
 class EventType(Enum):
     OUTPUTS = "STATUS_OUTPUTS"
-    SYSTEM = "STATUS_SYSTEM"
-    PERIPHERAL = "STATUS_BUS_HA_SENSORS"
+    SYSTEMS = "STATUS_SYSTEM"
+    PERIPHERALS = "STATUS_BUS_HA_SENSORS"
     TEMPERATURES = "STATUS_TEMPERATURES"
+    ZONES = "STATUS_ZONES"
+    PARTITIONS = "STATUS_PARTITIONS"
+
+class ReadType(Enum):
+    OUTPUTS = "OUTPUTS"
+    PERIPHERALS = "BUS_HAS"
+    SCENARIOS = "SCENARIOS"
+    STATUS_OUTPUTS = "STATUS_OUTPUTS"
+    STATUS_SYSTEMS = "STATUS_SYSTEM"
+    STATUS_PERIPHERALS = "STATUS_BUS_HA_SENSORS"
+    STATUS_TEMPERATURES = "STATUS_TEMPERATURES"
+    STATUS_ZONES = "STATUS_ZONES"
+    STATUS_PARTITIONS = "STATUS_PARTITIONS"
+
+class ReadCallable(Enum):
+    OUTPUTS = "read_outputs"
+    BUS_HAS = "read_peripherals"
+    SCENARIOS = "read_scenarios"
+    STATUS_OUTPUTS = "read_outputs_status"
+    STATUS_SYSTEM = "read_systems_status"
+    STATUS_BUS_HA_SENSORS = "read_peripherals_status"
+    STATUS_TEMPERATURES = "read_temperatures_status"
+    STATUS_ZONES = "read_zones_status"
+    STATUS_PARTITIONS = "read_partitions_status"
 
 @dataclass
 class Zone:
@@ -137,13 +157,13 @@ class SystemTimeStatus:
 class SystemStatus:
     """System status."""
     id: int
-    informations: Array
-    tamper: Array
-    tamper_memory: Array
-    alarm: Array
-    alarm_memory: Array
-    fault: Array
-    fault_memory: Array
+    informations: list
+    tamper: list
+    tamper_memory: list
+    alarm: list
+    alarm_memory: list
+    fault: list
+    fault_memory: list
     arm: SystemArmStatus
     temperature: SystemTemperatureStatus
     time: SystemTimeStatus
